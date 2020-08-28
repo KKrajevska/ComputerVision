@@ -4,6 +4,8 @@ import torch
 import torch.utils.data
 from PIL import Image
 import cv2
+from tqdm import tqdm
+from joblib import Parallel, delayed
 
 upperbody = list(range(0, 6))
 lowerbody = [6, 7, 8]
@@ -20,28 +22,64 @@ decorations = list(range(36, 46))
 
 
 class DataSet(torch.utils.data.Dataset):
-    def __init__(self, root, stage, csv_info, transforms):
+    def __init__(
+        self,
+        root,
+        stage,
+        csv_info,
+        transforms,
+        resize_shape=(128, 128),
+        train=True,
+        cnt=None,
+    ):
         self.root = root
         self.stage = stage
         self.transforms = transforms
         self.csv_info = csv_info
-        self.resize_shape = (128, 128)
+        self.resize_shape = resize_shape
         self.imgs = list(sorted(os.listdir(os.path.join(root, stage))))
+        if cnt:
+            self.imgs = self.imgs[:cnt]
 
-    def __getitem__(self, idx):
-        try:
-            img_path = os.path.join(self.root, self.stage, self.imgs[idx])
-            img = Image.open(img_path).convert("RGB")
+        self.train = train
+        if self.train:
+            print("Reading imgs in RAM...")
+            self.imgs_and_masks = Parallel(n_jobs=6, prefer="threads")(
+                delayed(self.get_resized_img_and_mask)(x)
+                for x in tqdm(range(len(self.imgs)))
+            )
+            print("Images read!")
 
-            np_img = np.array(img)
-            img = img.resize(self.resize_shape, Image.NEAREST)
+    def get_image(self, idx):
+        img_path = os.path.join(self.root, self.stage, self.imgs[idx])
+        return Image.open(img_path).convert("RGB")
 
+    def get_resized_img_and_mask(self, idx, return_og_img=False):
+        og_img = self.get_image(idx)
+        img = og_img.resize(self.resize_shape, Image.NEAREST)
+
+        if not self.train:
+            return img, None, og_img
+        else:
+            np_img = np.asarray(og_img)
             mask = self.get_mask_color_coded(
                 self.imgs[idx], np_img.shape[0], np_img.shape[1]
             )
             mask = np.array(mask)
-            mask = cv2.resize(mask, self.resize_shape, interpolation=cv2.INTER_NEAREST)
+            mask = DataSet.resize_mask(mask, self.resize_shape)
+            return img, mask
 
+    @staticmethod
+    def resize_mask(mask, shape):
+        return cv2.resize(mask, shape, interpolation=cv2.INTER_NEAREST)
+
+    def __getitem__(self, idx):
+        if self.train:
+            img, mask = self.imgs_and_masks[idx]
+        else:
+            img, mask, og_img = self.get_resized_img_and_mask(idx)
+
+        if self.train:
             obj_ids = np.unique(mask)
             obj_ids = obj_ids[1:]
             masks = mask == obj_ids[:, None, None]
@@ -81,13 +119,16 @@ class DataSet(torch.utils.data.Dataset):
             target["image_id"] = image_id
             target["area"] = area
             target["iscrowd"] = iscrowd
+        else:
+            target = {}
 
-            if self.transforms is not None:
-                img, target = self.transforms(img, target)
+        if self.transforms is not None:
+            img, target = self.transforms(img, target)
 
+        if self.train:
             return img, target
-        except:
-            print(img_path, idx)
+        else:
+            return img, target, og_img
 
     def __len__(self):
         return len(self.imgs)

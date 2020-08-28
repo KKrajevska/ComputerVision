@@ -10,7 +10,9 @@ from coco_eval import CocoEvaluator
 import utils
 
 
-def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
+def train_one_epoch(
+    model, optimizer, data_loader, device, epoch, print_freq, tb_writer
+):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", utils.SmoothedValue(window_size=1, fmt="{value:.6f}"))
@@ -37,18 +39,19 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
             )
         except:
             print("neeeee")
-            breakpoint()
+            # breakpoint()
 
         try:
             loss_dict = model(images, targets)
         except:
             print("daaaaa")
-            breakpoint()
+            # breakpoint()
 
         losses = sum(loss for loss in loss_dict.values())
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = utils.reduce_dict(loss_dict)
+
         losses_reduced = sum(loss for loss in loss_dict_reduced.values())
 
         loss_value = losses_reduced.item()
@@ -65,8 +68,18 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
         if lr_scheduler is not None:
             lr_scheduler.step()
 
-        metric_logger.update(loss=losses_reduced, **loss_dict_reduced)
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(
+            loss=losses_reduced,
+            epoch=tb_writer["step"],
+            tb_writer=tb_writer["writer"],
+            **loss_dict_reduced
+        )
+        metric_logger.update(
+            lr=optimizer.param_groups[0]["lr"],
+            epoch=tb_writer["step"],
+            tb_writer=tb_writer["writer"],
+        )
+        tb_writer["step"] += 1
 
 
 def _get_iou_types(model):
