@@ -77,7 +77,7 @@ def write_result(og_img, img, prediction, index, epoch, resolution):
     cv2.imwrite(str(filepath / f"og_img_{index}_cnts.png"), og_img_np[:, :, ::-1])
 
 
-def execute(resize_shape, batch_size, num_epochs, write_results=True):
+def execute(resize_shape, batch_size, num_epochs, write_results=True, pretrain=False):
     df = pd.read_csv("./imaterialist-fashion-2019-FGVC6/train.csv")
     dataset = DataSet(
         "./imaterialist-fashion-2019-FGVC6",
@@ -141,8 +141,14 @@ def execute(resize_shape, batch_size, num_epochs, write_results=True):
     num_classes = 13
     output_dir = "models"
     utils.mkdir("models")
+    if pretrain:
+        output_dir="pretrain"
+        utils.mkdir("pretrain")
+    
     model_instance = Model()
     model = model_instance.get_instance_segmentation_model(num_classes)
+    if pretrain:
+        model.load_state_dict(torch.load("./models/model_4.pth")['model'])
     model.to(device)
 
     # construct an optimizer
@@ -194,7 +200,7 @@ def main():
     batch_sizes = [8]
 
     for shape, batch_size in zip(shapes, batch_sizes):
-        execute(shape, batch_size, 10, True)
+        execute(shape, batch_size, 10, True, True)
 
 
 if __name__ == "__main__":
